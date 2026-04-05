@@ -1,7 +1,7 @@
 ---
 name: UnitTester
 description: "Writes comprehensive xUnit unit tests for a given .NET module or service. Use when adding test coverage, after refactoring, or as part of CI prep."
-tools: ['read', 'edit', 'run', 'search']
+tools: ['read', 'edit', 'search']
 user-invocable: true
 model: GPT-5 mini (copilot)
 argument-hint: "Target path to test (e.g. 'src/Services/Payment'). Mention if project uses NUnit or MSTest instead of xUnit."
