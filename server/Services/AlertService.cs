@@ -5,27 +5,60 @@ using System.Text;
 
 namespace NdoMcp.Server.Services;
 
+/// <summary>
+/// In-memory alert store and notification hub for WebSocket sessions.
+///
+/// Responsible for tracking active incidents, managing client subscriptions, and broadcasting
+/// alert notifications to connected WebSocket sessions. This implementation is intentionally
+/// simple and holds data in-memory; it is suitable for demos and local testing but not for
+/// production scale or persistence requirements.
+/// </summary>
 public class AlertService
 {
     private readonly ConcurrentDictionary<string, (string type, int severity, string city, DateTime time)> _activeAlerts = new();
     private readonly ConcurrentDictionary<Guid, (WebSocket socket, HashSet<string> subs)> _sessions = new();
 
-    public void AddSession(Guid id, WebSocket socket)
+    /// <summary>
+/// Register a WebSocket session so the service can send notifications to the client.
+///
+/// Stores the socket and an initially-empty subscription list for the session id.
+/// </summary>
+/// <param name="id">Unique session identifier supplied by the server connection handler.</param>
+/// <param name="socket">The open <see cref="WebSocket"/> through which notifications are sent.</param>
+public void AddSession(Guid id, WebSocket socket)
     {
         _sessions[id] = (socket, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
     }
 
-    public void RemoveSession(Guid id)
+    /// <summary>
+/// Remove a previously-registered session and stop sending notifications to it.
+/// </summary>
+/// <param name="id">The session identifier to remove.</param>
+public void RemoveSession(Guid id)
     {
         _sessions.TryRemove(id, out _);
     }
 
-    public void SetInitialized(Guid id)
+    /// <summary>
+/// Mark a session as initialized. Currently a no-op; presence in the session registry is sufficient.
+///
+/// Kept as a semantic hook for clients that perform an explicit initialization handshake.
+/// </summary>
+/// <param name="id">Session identifier that completed initialization.</param>
+public void SetInitialized(Guid id)
     {
         // No-op for now; presence in _sessions is enough
     }
 
-    public void Subscribe(Guid id, string disasterType)
+    /// <summary>
+/// Subscribe the specified session to alerts of the given disaster type.
+///
+/// Subscribed sessions will receive notification messages created by <see cref="AddAlert"/> when
+/// an alert of the matching type is generated.
+/// </summary>
+/// <param name="id">Session identifier that is subscribing.</param>
+/// <param name="disasterType">Disaster type (e.g. "earthquake", "flood", "storm").</param>
+public void Subscribe(Guid id, string disasterType)
     {
         if (_sessions.TryGetValue(id, out var entry))
         {
@@ -33,7 +66,14 @@ public class AlertService
         }
     }
 
-    public string GetAlertsText()
+    /// <summary>
+/// Create a human-readable summary of currently active alerts.
+///
+/// Returns either a single line indicating no alerts or a newline-separated list of alerts with
+/// severity, type, city and timestamp suitable for text responses over the MCP protocol.
+/// </summary>
+/// <returns>Newline-delimited textual summary of active alerts.</returns>
+public string GetAlertsText()
     {
         var alertsList = new List<string>();
         if (_activeAlerts.IsEmpty)
@@ -51,7 +91,22 @@ public class AlertService
         return string.Join("\n", alertsList);
     }
 
-    public string AddAlert(string type, int severity, string city)
+    /// <summary>
+/// Add a new active alert and broadcast a notification to subscribed sessions.
+///
+/// This method stores the alert in-memory and asynchronously sends a JSON-RPC notification to
+/// any connected WebSocket sessions that have subscribed to the alert type.
+/// </summary>
+/// <param name="type">Disaster type (e.g. "earthquake").</param>
+/// <param name="severity">Severity on a 1-10 scale.</param>
+/// <param name="city">City where the incident occurred.</param>
+/// <returns>A string GUID that identifies the created alert.</returns>
+/// <example>
+/// <code>
+/// var id = alertService.AddAlert("earthquake", 8, "Coastville");
+/// </code>
+/// </example>
+public string AddAlert(string type, int severity, string city)
     {
         var id = Guid.NewGuid().ToString();
         _activeAlerts[id] = (type, severity, city, DateTime.UtcNow);
@@ -76,10 +131,32 @@ public class AlertService
         return id;
     }
 
-    public IReadOnlyDictionary<string, (string type, int severity, string city, DateTime time)> GetActiveAlertsSnapshot()
+    /// <summary>
+/// Return a snapshot of active alerts suitable for read-only inspection.
+///
+/// The returned dictionary is a shallow copy of the in-memory store and may be iterated by callers
+/// without affecting the service's internal collections.
+/// </summary>
+/// <returns>Read-only dictionary mapping alert id to alert details (type, severity, city, timestamp).</returns>
+public IReadOnlyDictionary<string, (string type, int severity, string city, DateTime time)> GetActiveAlertsSnapshot()
         => _activeAlerts.ToDictionary(kv => kv.Key, kv => kv.Value);
 
-    public async Task<string> GenerateIncidentSummary(System.Net.Http.HttpClient httpClient)
+    /// <summary>
+/// Generate a concise incident summary using the Gemma LLM for command-center analysis.
+///
+/// The method aggregates active alerts into a short prompt and calls the external Gemma API.
+/// It expects the environment variable <c>GEMMA_API_KEY</c> to be set. Errors from the LLM call are
+/// returned as error strings rather than thrown exceptions to simplify caller handling.
+/// </summary>
+/// <param name="httpClient">An <see cref="System.Net.Http.HttpClient"/> used to call the Gemma API.</param>
+/// <returns>A short natural-language summary or an error message describing the failure.</returns>
+/// <example>
+/// <code>
+/// var summary = await alertService.GenerateIncidentSummary(httpClient);
+/// Console.WriteLine(summary);
+/// </code>
+/// </example>
+public async Task<string> GenerateIncidentSummary(System.Net.Http.HttpClient httpClient)
     {
         var gemmaApiKey = Environment.GetEnvironmentVariable("GEMMA_API_KEY") ?? string.Empty;
         if (string.IsNullOrEmpty(gemmaApiKey))

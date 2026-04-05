@@ -2,11 +2,25 @@ using Microsoft.Extensions.Hosting;
 
 namespace NdoMcp.Server.Services;
 
+/// <summary>
+/// Background service that periodically generates simulated disaster alerts.
+///
+/// This hosted service produces randomized disaster events (earthquake, flood, storm)
+/// and adds them to the central <see cref="AlertService"/> so connected clients can be
+/// notified. It exists to provide a lightweight source of test data for the MCP protocol.
+/// </summary>
 public class AlertGenerator : BackgroundService
 {
     private readonly AlertService _alertService;
 
-    public AlertGenerator(AlertService alertService)
+    /// <summary>
+/// Creates a new AlertGenerator bound to the application's <see cref="AlertService"/>.
+///
+/// The generator will call into <see cref="AlertService.AddAlert"/> to create alerts which are
+/// then broadcast to subscribed sessions.
+/// </summary>
+/// <param name="alertService">The alert service used to store and broadcast generated alerts.</param>
+public AlertGenerator(AlertService alertService)
     {
         _alertService = alertService;
     }
